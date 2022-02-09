@@ -1,0 +1,3 @@
+[submodule "Thirdparty/JsonMapper"]
+	path = Thirdparty/JsonMapper
+	url = https://github.com/carlcc/JsonMapper.git
