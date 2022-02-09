@@ -51,4 +51,5 @@ $ ./FlexClient [your_config_file.json]
 - jsonmapper (bundled)
 - rapidjson (bundled)
 - kcp (bundled)
+- spdlog (bundled)
 - a C++ compiler with C++17 support
