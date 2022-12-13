@@ -3,9 +3,9 @@
 #include "FlexCommon/MiscUtils.h"
 #include <chrono>
 
-#define FORARDER_L_INFO(fmt, ...) L_INFO(fmt " ({})", ##__VA_ARGS__, id_)
-#define FORARDER_L_ERROR(fmt, ...) L_ERROR(fmt " ({})", ##__VA_ARGS__, id_)
-#define FORARDER_SCOPE_EXIT_INFO(fmt, ...) SCOPE_EXIT_INFO(fmt " ({})", ##__VA_ARGS__, id_)
+#define FORARDER_L_INFO(fmt, ...) L_INFO(" ({})" fmt, id_, ##__VA_ARGS__)
+#define FORARDER_L_ERROR(fmt, ...) L_ERROR(" ({})" fmt, id_, ##__VA_ARGS__)
+#define FORARDER_SCOPE_EXIT_INFO(fmt, ...) SCOPE_EXIT_INFO(" ({})" fmt, id_, ##__VA_ARGS__)
 
 using namespace std::chrono_literals;
 

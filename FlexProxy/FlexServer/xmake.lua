@@ -1,0 +1,10 @@
+target("FlexServer")
+    set_kind("binary")
+    add_files("src/**.cpp")
+    add_headerfiles("include/**")
+    add_includedirs("include")
+    set_languages("cxx17")
+
+    add_deps("FlexCommon", "jsonmapper")
+    add_packages("boost")
+target_end()

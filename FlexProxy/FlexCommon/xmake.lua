@@ -1,0 +1,10 @@
+target("FlexCommon")
+    set_kind("static")
+    add_files("src/**.cpp", "src/**.c")
+    add_headerfiles("include/**")
+    add_includedirs("include", { public = true })
+    add_includedirs("src")
+    set_languages("cxx17")
+
+    add_packages("boost")
+target_end()
