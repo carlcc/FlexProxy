@@ -55,7 +55,7 @@ bool ClientSideForwarder::Start(const asio::ip::udp::endpoint& remoteUdpEndpoint
     kcpCb_->output = [](const char* buf, int len, ikcpcb* kcp, void* user) -> int {
         auto* self = reinterpret_cast<ClientSideForwarder*>(user);
         MiscUtils::Encrypt((uint8_t*)buf, len);
-        boost::system::error_code ec;
+        std::error_code ec;
 #ifdef ENABLE_CHECK_SUM
         auto checkSum = MiscUtils::XorCheck((const uint8_t*)buf, len);
         std::vector<asio::const_buffer> buffers {

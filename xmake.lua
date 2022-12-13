@@ -5,5 +5,6 @@ if is_plat("windows") then
 end
 
 includes("Thirdparty/asio-1.24.0")
+includes("Thirdparty/spdlog")
 includes("Thirdparty/JsonMapper")
 includes("FlexProxy")

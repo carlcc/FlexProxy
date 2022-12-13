@@ -7,7 +7,6 @@
 #include <asio/ip/tcp.hpp>
 #include <asio/ip/udp.hpp>
 #include <asio/signal_set.hpp>
-#include <asio/spawn.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/write.hpp>
 
@@ -15,7 +14,8 @@ using asio_tcp = asio::ip::tcp;
 using asio_udp = asio::ip::udp;
 
 namespace FS {
-inline bool IsTryAgain(boost::system::error_code error)
+
+inline bool IsTryAgain(std::error_code error)
 {
     return error == std::errc::resource_unavailable_try_again || error == std::errc::operation_would_block;
 }

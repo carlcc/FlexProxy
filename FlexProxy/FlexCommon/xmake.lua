@@ -6,5 +6,5 @@ target("FlexCommon")
     add_includedirs("src")
     set_languages("cxx20")
 
-    add_deps("asio", { public = true })
+    add_deps("asio", "spdlog", { public = true })
 target_end()
