@@ -47,9 +47,16 @@ $ ./FlexClient [your_config_file.json]
 
 # Dependencies
 
-- boost: system, asio, coroutine (You need to install them before compiling)
+- asio (bundled)
 - jsonmapper (bundled)
-- rapidjson (bundled)
+- JsonMapper (bundled)
 - kcp (bundled)
 - spdlog (bundled)
 - a C++ compiler with C++17 support
+
+# Build
+
+```
+xmake f --jsonmapper-use-bundled-rapidjson=yes
+xmake
+```

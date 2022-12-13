@@ -14,7 +14,7 @@ public:
     void Start();
 
 private:
-    void TcpAcceptCoroutine(asio::yield_context yield);
+    asio::awaitable<void> TcpAcceptCoroutine();
 
 private:
     asio::io_context& ioContext_;

@@ -14,9 +14,9 @@ static bool ParseAddressAndPort(asio::ip::address& address, uint16_t& port, std:
         return false;
     }
 
-    boost::system::error_code ec;
+    std::error_code ec;
     address = asio::ip::make_address(ipPortStr.substr(0, index), ec);
-    if (ec.failed()) {
+    if (ec) {
         L_ERROR("Invalid socket address {}: invalid ip {}!", ipPortStr, ipPortStr.substr(0, index));
         return false;
     }

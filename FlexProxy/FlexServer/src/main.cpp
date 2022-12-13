@@ -3,7 +3,6 @@
 #include "FlexServer/FlexServer.h"
 #include <jsonmapper/types/serialize/string.h>
 #include <jsonmapper/types/deserialize/string.h>
-#include <boost/asio.hpp>
 #include <iostream>
 #include <string>
 
@@ -30,7 +29,7 @@ int main(int argc, char** argv)
             std::cout << "The final config is: " << content << std::endl;
         }
     }
-    boost::asio::io_context ioContext;
+    asio::io_context ioContext;
 
     FS::LoggerInit(config.logFile.empty() ? nullptr : config.logFile.c_str(), FS::LogLevel::kInfo);
     FS::FlexServer server(ioContext, config);

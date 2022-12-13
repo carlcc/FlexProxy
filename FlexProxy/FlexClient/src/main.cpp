@@ -1,7 +1,7 @@
 #include "FlexClient/FlexClient.h"
+#include "FlexCommon/Asio.h"
 #include "FlexCommon/Log.h"
 #include "FlexCommon/MiscUtils.h"
-#include <boost/asio.hpp>
 #include <iostream>
 #include <jsonmapper/types/deserialize/string.h>
 #include <jsonmapper/types/serialize/string.h>
@@ -33,7 +33,7 @@ int main(int argc, char** argv)
 
     FS::LoggerInit(config.logFile.empty() ? nullptr : config.logFile.c_str(), FS::LogLevel::kInfo);
 
-    boost::asio::io_context ioContext;
+    asio::io_context ioContext;
     FS::FlexClient client(ioContext, config);
     if (!client.Initialize()) {
         L_ERROR("Failed to initialize client");

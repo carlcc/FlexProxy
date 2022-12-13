@@ -36,186 +36,197 @@ bool Forwarder::Start(const asio::ip::udp::endpoint& localUdpEndpoint, const asi
     auto spThis = shared_from_this();
 
     //  Create udp socket
-    boost::system::error_code ec;
+    std::error_code ec;
     udpSocket_.open(localUdpEndpoint.protocol(), ec);
-    if (ec.failed()) {
+    if (ec) {
         FORARDER_L_ERROR("Failed to open udp address {}:{}: {}", localUdpEndpoint.address().to_string(), localUdpEndpoint.port(), ec.message());
         return false;
     }
     udpSocket_.set_option(asio_udp::socket::reuse_address(true));
     udpSocket_.bind(localUdpEndpoint, ec);
-    if (ec.failed()) {
+    if (ec) {
         FORARDER_L_ERROR("Failed to bind udp address {}:{}: {}", localUdpEndpoint.address().to_string(), localUdpEndpoint.port(), ec.message());
         return false;
     }
     udpSocket_.connect(remoteUdpEndpoint, ec);
-    if (ec.failed()) {
+    if (ec) {
         FORARDER_L_ERROR("Failed to connect udp address {}:{}: {}", remoteUdpEndpoint.address().to_string(), remoteUdpEndpoint.port(), ec.message());
         return false;
     }
 
-    asio::spawn(ioContext_, [this, spThis, remoteTcpEndpoint](asio::yield_context yield) noexcept {
-        FORARDER_SCOPE_EXIT_INFO("Forward start coroutine complete...");
+    asio::co_spawn(
+        ioContext_, [this, spThis, remoteTcpEndpoint]() noexcept -> asio::awaitable<void> {
+            FORARDER_SCOPE_EXIT_INFO("Forward start coroutine complete...");
 
-        // TODO:
-        //  Create tcp socket and connect
-        boost::system::error_code ec;
-        tcpSocket_.open(remoteTcpEndpoint.protocol(), ec);
-        if (ec.failed()) {
-            FORARDER_L_ERROR("Failed to open tcp socket: {}", ec.message());
-            return;
-        }
-        tcpSocket_.async_connect(remoteTcpEndpoint, yield[ec]);
-        if (ec.failed()) {
-            FORARDER_L_ERROR("Failed to connect to {}:{}: {}", remoteTcpEndpoint.address().to_string(), remoteTcpEndpoint.port(), ec.message());
-            return;
-        }
-
-        isRunning_ = true;
-
-        asio::spawn(ioContext_, [this, spThis](asio::yield_context yield) noexcept {
-            FORARDER_SCOPE_EXIT_INFO("tcp to kcp coroutine complete...");
-            // Receive from tcp, send to kcp
-            boost::system::error_code ec;
-            char receiveBufferMemory[4096];
-            auto receiveBuffer = asio::buffer(receiveBufferMemory, sizeof(receiveBufferMemory));
-
-            asio::steady_timer timer { ioContext_ };
-            while (isRunning_) {
-                auto n = tcpSocket_.async_receive(receiveBuffer, yield[ec]);
-                if (ec.failed()) {
-                    if (IsTryAgain(ec)) {
-                        continue;
-                    }
-                    FORARDER_L_ERROR("Failed to receive tcp: {}", ec.message());
-                    Stop();
-                    return;
-                }
-
-                ikcp_send(kcpCb_, receiveBufferMemory, (int)n);
-
-                // 下面似乎会导致问题，git clone 拉代码时链接断开
-                // 1400 * (1024 * 10)  = 14MB, the send buffer is about 14MB
-                // wait data to be flushed, to avoid to many data in memory
-                // while (ikcp_waitsnd(kcpCb_) > 1024 * 10) {
-                //     timer.expires_after(5ms);
-                //     timer.async_wait(yield[ec]);
-                //     if (ec.failed()) {
-                //         L_ASSERT(false, "Failed to async wait, should not happen!");
-                //         abort();
-                //     }
-                //     if (!isRunning_) {
-                //         return;
-                //     }
-                // }
+            // TODO:
+            //  Create tcp socket and connect
+            std::error_code ec;
+            tcpSocket_.open(remoteTcpEndpoint.protocol(), ec);
+            if (ec) {
+                FORARDER_L_ERROR("Failed to open tcp socket: {}", ec.message());
+                co_return;
             }
-        });
-        asio::spawn(ioContext_, [this, spThis](asio::yield_context yield) noexcept {
-            FORARDER_SCOPE_EXIT_INFO("kcp to tcp coroutine complete...");
-            using namespace std::chrono;
-            asio::steady_timer timer { ioContext_ };
-            boost::system::error_code ec;
+            ec = co_await AsyncConnect(tcpSocket_, remoteTcpEndpoint);
+            if (ec) {
+                FORARDER_L_ERROR("Failed to connect to {}:{}: {}", remoteTcpEndpoint.address().to_string(), remoteTcpEndpoint.port(), ec.message());
+                co_return;
+            }
 
-            auto now = steady_clock::now();
+            isRunning_ = true;
 
-            char receiveBuffer[4 * 4096];
-            while (isRunning_) {
-                ikcp_update(kcpCb_, (IUINT32)duration_cast<milliseconds>(now.time_since_epoch()).count());
+            asio::co_spawn(
+                ioContext_, [this, spThis]() noexcept -> asio::awaitable<void> {
+                    FORARDER_SCOPE_EXIT_INFO("tcp to kcp coroutine complete...");
+                    // Receive from tcp, send to kcp
+                    char receiveBufferMemory[4096];
+                    auto receiveBuffer = asio::buffer(receiveBufferMemory, sizeof(receiveBufferMemory));
 
-                do {
-                    // Try to read date from kcp, and forward to tcp
-                    auto n = ikcp_recv(kcpCb_, receiveBuffer, sizeof(receiveBuffer));
-                    if (n <= 0) {
-                        break;
-                    }
-
-                    do {
-                        asio::async_write(tcpSocket_, asio::const_buffer(receiveBuffer, n), yield[ec]);
-                        if (ec.failed()) {
+                    asio::steady_timer timer { ioContext_ };
+                    while (isRunning_) {
+                        size_t n;
+                        try {
+                            n = co_await tcpSocket_.async_receive(receiveBuffer, asio::use_awaitable);
+                        } catch (std::system_error& e) {
+                            auto ec = e.code();
                             if (IsTryAgain(ec)) {
-                                timer.expires_after(2ms);
-                                timer.async_wait(yield[ec]);
                                 continue;
                             }
-                            FORARDER_L_INFO("Failed to write tcp: {}", ec.message());
+                            FORARDER_L_ERROR("Failed to receive tcp: {}", ec.message());
                             Stop();
-                            return;
+                            co_return;
                         }
-                        break;
-                    } while (true);
-                } while (true);
 
-                timer.expires_at(now + 10ms);
-                timer.async_wait(yield[ec]);
-                if (ec.failed()) {
-                    L_ASSERT(false, "Unhandled error!");
-                    return;
-                }
-                now = steady_clock::now();
-            }
-        });
-        asio::spawn(ioContext_, [this, spThis](asio::yield_context yield) noexcept {
-            FORARDER_SCOPE_EXIT_INFO("kcp feed coroutine complete...");
-            uint8_t receiveBufferMemory[4096];
-            auto receiveBuffer = asio::buffer(receiveBufferMemory, sizeof(receiveBufferMemory));
-            boost::system::error_code ec;
-            while (isRunning_) {
-                auto n = udpSocket_.async_receive(receiveBuffer, yield[ec]);
-                if (ec.failed()) {
-                    if (IsTryAgain(ec)) {
-                        continue;
+                        ikcp_send(kcpCb_, receiveBufferMemory, (int)n);
+
+                        // 下面似乎会导致问题，git clone 拉代码时链接断开
+                        // 1400 * (1024 * 10)  = 14MB, the send buffer is about 14MB
+                        // wait data to be flushed, to avoid to many data in memory
+                        // while (ikcp_waitsnd(kcpCb_) > 1024 * 10) {
+                        //     timer.expires_after(5ms);
+                        //     timer.async_wait(yield[ec]);
+                        //     if (ec) {
+                        //         L_ASSERT(false, "Failed to async wait, should not happen!");
+                        //         abort();
+                        //     }
+                        //     if (!isRunning_) {
+                        //         return;
+                        //     }
+                        // }
                     }
-                    FORARDER_L_ERROR("Failed to receive udp: {}", ec.message());
-                    Stop();
-                    return;
-                }
-                isKcpAlive_ = true;
+                },
+                asio::detached);
+            asio::co_spawn(
+                ioContext_, [this, spThis]() noexcept -> asio::awaitable<void> {
+                    FORARDER_SCOPE_EXIT_INFO("kcp to tcp coroutine complete...");
+                    using namespace std::chrono;
+                    asio::steady_timer timer { ioContext_ };
+                    auto now = steady_clock::now();
+
+                    char receiveBuffer[4 * 4096];
+                    while (isRunning_) {
+                        ikcp_update(kcpCb_, (IUINT32)duration_cast<milliseconds>(now.time_since_epoch()).count());
+
+                        do {
+                            // Try to read date from kcp, and forward to tcp
+                            auto n = ikcp_recv(kcpCb_, receiveBuffer, sizeof(receiveBuffer));
+                            if (n <= 0) {
+                                break;
+                            }
+
+                            do {
+                                auto ec = co_await AsyncWrite(tcpSocket_, asio::const_buffer(receiveBuffer, n));
+                                if (ec) {
+                                    if (IsTryAgain(ec)) {
+                                        timer.expires_after(2ms);
+                                        co_await AsyncWait(timer);
+                                        continue;
+                                    }
+                                    FORARDER_L_INFO("Failed to write tcp: {}", ec.message());
+                                    Stop();
+                                    co_return;
+                                }
+                                break;
+                            } while (true);
+                        } while (true);
+
+                        timer.expires_at(now + 10ms);
+                        auto ec = co_await AsyncWait(timer);
+                        if (ec) {
+                            L_ASSERT(false, "Unhandled error!");
+                            co_return;
+                        }
+                        now = steady_clock::now();
+                    }
+                },
+                asio::detached);
+            asio::co_spawn(
+                ioContext_, [this, spThis]() noexcept -> asio::awaitable<void> {
+                    FORARDER_SCOPE_EXIT_INFO("kcp feed coroutine complete...");
+                    uint8_t receiveBufferMemory[4096];
+                    auto receiveBuffer = asio::buffer(receiveBufferMemory, sizeof(receiveBufferMemory));
+                    while (isRunning_) {
+                        size_t n;
+                        try {
+                            n = co_await udpSocket_.async_receive(receiveBuffer, asio::use_awaitable);
+                        } catch (std::system_error& e) {
+                            auto ec = e.code();
+                            if (IsTryAgain(ec)) {
+                                continue;
+                            }
+                            FORARDER_L_ERROR("Failed to receive udp: {}", ec.message());
+                            Stop();
+                            co_return;
+                        }
+                        isKcpAlive_ = true;
 
 #ifdef ENABLE_CHECK_SUM
-                if (n > 1) {
-                    auto checkSum = MiscUtils::XorCheck((uint8_t*)receiveBufferMemory + 1, n - 1);
-                    if (checkSum == receiveBufferMemory[0]) {
-                        MiscUtils::Encrypt(receiveBufferMemory + 1, n - 1);
-                        ikcp_input(kcpCb_, (const char*)receiveBufferMemory + 1, (int)n - 1);
-                    } else {
-                        FORARDER_L_ERROR("Checksum error!");
-                    }
-                } else {
-                    FORARDER_L_ERROR("Invalid udp data!");
-                }
+                        if (n > 1) {
+                            auto checkSum = MiscUtils::XorCheck((uint8_t*)receiveBufferMemory + 1, n - 1);
+                            if (checkSum == receiveBufferMemory[0]) {
+                                MiscUtils::Encrypt(receiveBufferMemory + 1, n - 1);
+                                ikcp_input(kcpCb_, (const char*)receiveBufferMemory + 1, (int)n - 1);
+                            } else {
+                                FORARDER_L_ERROR("Checksum error!");
+                            }
+                        } else {
+                            FORARDER_L_ERROR("Invalid udp data!");
+                        }
 #else
-                MiscUtils::Encrypt(receiveBufferMemory , n);
-                ikcp_input(kcpCb_, (const char*)receiveBufferMemory , (int)n);
+                        MiscUtils::Encrypt(receiveBufferMemory , n);
+                        ikcp_input(kcpCb_, (const char*)receiveBufferMemory , (int)n);
 #endif
-            }
-        });
-        asio::spawn(ioContext_, [this, spThis](asio::yield_context yield) noexcept {
-            FORARDER_SCOPE_EXIT_INFO("active timer coroutine complete...");
-            using namespace std::chrono;
-            asio::steady_timer timer { ioContext_ };
-            boost::system::error_code ec;
+                    }
+                },
+                asio::detached);
+            asio::co_spawn(
+                ioContext_, [this, spThis]() noexcept -> asio::awaitable<void> {
+                    FORARDER_SCOPE_EXIT_INFO("active timer coroutine complete...");
+                    using namespace std::chrono;
+                    asio::steady_timer timer { ioContext_ };
 
-            while (isRunning_) {
-                timer.expires_after(5s);
-                timer.async_wait(yield[ec]);
-                L_ASSERT(!ec.failed(), "Bug unhandled error");
+                    while (isRunning_) {
+                        timer.expires_after(5s);
+                        auto ec = co_await AsyncWait(timer);
+                        L_ASSERT(!ec, "Bug unhandled error");
 
-                if (isKcpAlive_) {
-                    isKcpAlive_ = false;
-                } else {
-                    FORARDER_L_INFO("The user is inactive for too long, close()");
-                    Stop();
-                    return;
-                }
-            }
-        });
-    });
+                        if (isKcpAlive_) {
+                            isKcpAlive_ = false;
+                        } else {
+                            FORARDER_L_INFO("The user is inactive for too long, close()");
+                            Stop();
+                            co_return;
+                        }
+                    }
+                },
+                asio::detached);
+        },
+        asio::detached);
 
     // create kcp callback
     kcpCb_ = ikcp_create(0x5a3331fd, this);
     kcpCb_->output = [](const char* buf, int len, ikcpcb* kcp, void* user) -> int {
         auto* self = reinterpret_cast<Forwarder*>(user);
-        boost::system::error_code ec;
+        std::error_code ec;
         MiscUtils::Encrypt((uint8_t*)buf, len);
 
 #ifdef ENABLE_CHECK_SUM
@@ -262,7 +273,7 @@ void Forwarder::OnUdpData(const void* data, size_t len)
 void Forwarder::Stop()
 {
     isRunning_ = false;
-    boost::system::error_code ec;
+    std::error_code ec;
     udpSocket_.close(ec);
     tcpSocket_.close(ec);
 }

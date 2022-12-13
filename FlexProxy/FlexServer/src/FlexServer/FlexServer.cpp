@@ -33,9 +33,9 @@ bool FlexServer::Initialize()
     }
     L_INFO("Kcp server will listen on {}:{}", ep.address().to_string(), ep.port());
 
-    boost::system::error_code ec;
+    std::error_code ec;
     udpSocket_.open(ep.address().is_v4() ? asio_udp::v4() : asio_udp::v6(), ec);
-    if (ec.failed()) {
+    if (ec) {
         L_ERROR("Failed to open udp address {}: {}", config_.kcpBindAddr, ec.message());
         return false;
     }
@@ -43,7 +43,7 @@ bool FlexServer::Initialize()
     udpSocket_.set_option(asio_udp::socket::reuse_address(true));
 
     udpSocket_.bind(ep, ec);
-    if (ec.failed()) {
+    if (ec) {
         L_ERROR("Failed to bind udp address {}: {}", config_.kcpBindAddr, ec.message());
         return false;
     }
@@ -52,24 +52,28 @@ bool FlexServer::Initialize()
 
 void FlexServer::Start()
 {
-    asio::spawn(ioContext_, [this](asio::yield_context yield) noexcept {
-        UdpAcceptCoroutine(yield);
-    });
+    asio::co_spawn(
+        ioContext_, [this]() noexcept -> asio::awaitable<void> {
+            co_await UdpAcceptCoroutine();
+        },
+        asio::detached);
 }
 
-void FlexServer::UdpAcceptCoroutine(asio::yield_context yield)
+asio::awaitable<void> FlexServer::UdpAcceptCoroutine()
 {
     char receiveBufferMemory[4096];
     auto receiveBuffer = asio::buffer(receiveBufferMemory);
-    boost::system::error_code ec;
     asio_udp::endpoint remoteEndpoint;
     while (true) {
-        auto n = udpSocket_.async_receive_from(receiveBuffer, remoteEndpoint, yield[ec]);
-        if (ec.failed()) {
+        size_t n;
+        try {
+            n = co_await udpSocket_.async_receive_from(receiveBuffer, remoteEndpoint, asio::use_awaitable);
+        } catch (std::system_error& e) {
+            auto ec = e.code();
             if (IsTryAgain(ec)) {
                 continue;
             }
-            if (ec == boost::system::errc::operation_canceled) {
+            if (ec == std::errc::operation_canceled) {
                 L_INFO("Kcp service socket closed, stop accepting.");
                 break;
             }
@@ -94,7 +98,7 @@ void FlexServer::UdpAcceptCoroutine(asio::yield_context yield)
             } else {
                 L_INFO("Failed to start forwarder!");
                 // TODO: Reply something to peer?
-                return;
+                co_return;
             }
         } else {
             // A forwarder has been created for it, let's just forward the data to them

@@ -19,7 +19,7 @@ public:
     void Start();
 
 private:
-    void UdpAcceptCoroutine(asio::yield_context yield);
+    asio::awaitable<void> UdpAcceptCoroutine();
 
 private:
     asio::io_context& ioContext_;
